@@ -1,0 +1,194 @@
+---
+title: "Homework 3"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(tidymodels)
+library(corrplot)
+library(ggthemes)
+library(tidymodels)
+library(ISLR) 
+library(ISLR2) 
+library(discrim)
+library(poissonreg)
+library(corrr)
+library(klaR)
+library(yardstick)
+titanic <- read.csv('titanic.csv')
+```
+
+
+```{r}
+titanic$pclass <- as.factor(titanic$pclass)
+titanic$survived <- as.factor(titanic$survived)
+titanic$survived <- relevel(titanic$survived, ref = 'Yes')
+levels(titanic$survived)
+```
+Question 1:
+```{r}
+set.seed(608)
+titanicSplit <- initial_split(titanic, prop = 0.80,
+                                strata = survived)
+titanic_train <- training(titanicSplit)
+titanic_test <- testing(titanicSplit)
+
+```
+Training set has 712 obvs and testing set has 179
+
+```{r}
+head(titanic_train)
+```
+There is missing data in Cabin and in age for some passengers
+It is  a good idea to use stratified sampling for this data so it is not skewed towards one survival outcome.
+
+Question 2:
+```{r}
+titanic_train %>% 
+  ggplot(aes(x = survived)) +
+  geom_bar()
+```
+Training data contains more obs from passengers who did not survive than those who did
+
+Question 3:
+```{r}
+cor_titanic <- titanic %>%
+  select_if(is.numeric) %>%
+  correlate()
+rplot(cor_titanic)
+```
+
+Negatively Correlated: (Age, Parch), (age, sib_sp)
+Positively Correlated: (sib_sp, parch), (parch, fare)
+
+Question 4:
+```{r}
+titanic_recipe <- recipe(survived ~ sex + sib_sp + parch + age + fare + pclass, data = titanic_train) %>% 
+  step_impute_linear(age) %>% step_dummy(all_nominal_predictors()) %>% step_interact(terms = ~ age:fare + starts_with("sex"):fare)
+```
+Question 5:
+```{r}
+log_reg <- logistic_reg() %>% 
+  set_engine("glm") %>% 
+  set_mode("classification")
+
+log_wkflow <- workflow() %>% 
+  add_model(log_reg) %>% 
+  add_recipe(titanic_recipe)
+
+log_fit <- fit(log_wkflow, titanic_train)
+```
+
+Question 6:
+```{r}
+linDisc_mod <- discrim_linear() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+linDisc_wkflow <- workflow() %>% 
+  add_model(linDisc_mod) %>% 
+  add_recipe(titanic_recipe)
+
+linDisc_fit <- fit(linDisc_wkflow, titanic_train)
+```
+
+Question 7:
+```{r}
+quadDisc_mod <- discrim_quad() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+quadDisc_wkflow <- workflow() %>% 
+  add_model(quadDisc_mod) %>% 
+  add_recipe(titanic_recipe)
+
+quadDisc_fit <- fit(quadDisc_wkflow, titanic_train)
+```
+
+Question 8:
+```{r warning = FALSE}
+nb_mod <- naive_Bayes() %>% 
+  set_mode("classification") %>% 
+  set_engine("klaR") %>% 
+  set_args(usekernel = FALSE) 
+
+nb_wkflow <- workflow() %>% 
+  add_model(nb_mod) %>% 
+  add_recipe(titanic_recipe)
+
+nb_fit <- fit(nb_wkflow, titanic_train)
+```
+
+Question 9:
+```{r warning = FALSE}
+predict(log_fit, new_data = titanic_train, type = "prob")
+predict(linDisc_fit, new_data = titanic_train, type = "prob")
+predict(quadDisc_fit, new_data = titanic_train, type = "prob")
+predict(nb_fit, new_data = titanic_train, type = "prob")
+
+linDisc_acc <- augment(linDisc_fit, new_data = titanic_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+linDisc_acc
+
+log_acc <- augment(log_fit, new_data = titanic_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+
+
+quadDisc_acc <- augment(quadDisc_fit, new_data = titanic_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+
+
+nb_acc <- augment(nb_fit, new_data = titanic_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+
+linDisc_acc
+log_acc
+quadDisc_acc
+nb_acc
+```
+log model has the highest accuracy at 0.8075843
+
+Question 10:
+```{r}
+predict(log_fit, new_data = titanic_test, type = "prob")
+
+mod_acc <- augment(log_fit, new_data = titanic_test) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+
+
+mod_acc
+
+augment(log_fit, new_data = titanic_test) %>%
+  conf_mat(truth = survived, estimate = .pred_class) 
+
+
+```
+
+.8268156 accuracy on the testing data
+
+```{r}
+
+augment(log_fit, new_data = titanic_test) %>%
+  roc_curve(survived, .pred_Yes)  %>%
+  autoplot()
+
+
+```
+
+```{r}
+augment(log_fit, new_data = titanic_test) %>%
+  roc_auc(survived, .pred_Yes) 
+```
+
+the area under the curve is 0.8524374
+The model performed pretty well. Around 85% accuracy.
+The testing accuracy is about 0.02 higher than the training which I assume is a result of underfitting the model to the training data.
